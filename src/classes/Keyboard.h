@@ -2,12 +2,12 @@
 #define DEF_KEYBOARD
 
 #include <iostream>
-#include <libusb.h>
+#include <hidapi/hidapi.h>
 
 class Keyboard {
-	
+
 	public:
-		
+
 		enum class KeyboardProtocol { generic, g910 };
 		enum class PowerOnEffect { rainbow, color };
 		enum class KeyAddressGroup { logo, indicators, multimedia, keys, gkeys };
@@ -24,18 +24,18 @@ class Keyboard {
 			n1, n2, n3, n4, n5, n6, n7, n8, n9, n0,
 			tab, caps_lock, space, backspace, enter,
 			a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t, u, v, w, x, y, z,
-			tilde, minus, equal, 
-			open_bracket, close_bracket, backslash, 
+			tilde, minus, equal,
+			open_bracket, close_bracket, backslash,
 			semicolon, quote, dollar,
 			intl_backslash, comma, period, slash,
 			g1, g2, g3, g4, g5, g6, g7, g8, g9
 		};
 		enum class KeyGroup { logo, indicators, multimedia, fkeys, modifiers, arrows, numeric, functions, keys, gkeys};
-		
+
 		struct KeyColors { uint8_t red; uint8_t green; uint8_t blue; };
 		struct KeyAddress { KeyAddressGroup addressGroup; uint8_t id; };
 		struct KeyValue { KeyAddress key; KeyColors colors; };
-		
+
 		bool isAttached();
 		bool attach();
 		bool detach();
@@ -58,21 +58,18 @@ class Keyboard {
 		bool setFXHWave(uint8_t speed);
 		bool setFXVWave(uint8_t speed);
 		bool setFXCWave(uint8_t speed);
-		
-		
+
+
 	private:
-		
+
 		bool m_isAttached = false;
-		bool m_isKernellDetached = false;
 		KeyboardProtocol kbdProtocol = KeyboardProtocol::generic;
-		libusb_device **devs;
-		libusb_device_handle *dev_handle;
-		libusb_context *ctx = NULL;
-		
+		hid_device *dev_handle;
+
 		bool populateAddressGroupInternal(KeyAddressGroup addressGroup, unsigned char *data);
-		bool sendDataInternal(unsigned char *data, uint16_t data_size);
+		bool sendDataInternal(unsigned char *data, size_t data_size);
 		bool setKeysInternal(KeyAddressGroup addressGroup, KeyValue keyValues[], size_t keyValueCount);
-		
+
 };
 
 #endif

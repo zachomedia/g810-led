@@ -1,22 +1,29 @@
 CC=g++
 CFLAGS=-Wall -O2 -std=gnu++11
-LIBUSB_INC?=-I/usr/include/libusb-1.0
-LDFLAGS=-lusb-1.0
+LIBUSB_INC?=-I/usr/local/include
+LDFLAGS=-L/usr/local/lib -lhidapi
 PROGN=g810-led
 
 .PHONY: all debug clean install uninstall
 
 all: bin/$(PROGN)
 
-bin/$(PROGN): src/main.cpp src/classes/*.cpp src/classes/*.h
+bin/$(PROGN): src/classes/Keyboard.o src/main.o
 	@mkdir -p bin
 	$(CC) $(CFLAGS) $(LIBUSB_INC) -o $@ $^ $(LDFLAGS)
+
+src/main.o: src/main.cpp src/classes/Keyboard.h
+	$(CC) $(CFLAGS) $(LIBUSB_INC) -c -o $@ $<
+
+src/classes/Keyboard.o: src/classes/Keyboard.cpp src/classes/Keyboard.h
+	$(CC) $(CFLAGS) $(LIBUSB_INC) -c -o $@ $<
 
 debug: CFLAGS += -g -Wextra -pedantic
 debug: bin/$(PROGN)
 
 clean:
 	@rm -rf bin
+	@rm -rf */*.o */**/*.o
 
 install:
 	@sudo mkdir -p /etc/$(PROGN)/samples

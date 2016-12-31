@@ -2,8 +2,6 @@
 #include <vector>
 #include <unistd.h>
 #include <algorithm>
-#include "libusb.h"
-
 
 bool Keyboard::isAttached() {
 	return m_isAttached;
@@ -11,86 +9,51 @@ bool Keyboard::isAttached() {
 
 bool Keyboard::attach() {
 	if (m_isAttached == true) return false;
-	int r;
-	r = libusb_init(&ctx);
-	if (r < 0) return false;
-	
-	libusb_device **devs;
-	ssize_t cnt = libusb_get_device_list(ctx, &devs);
-	if(cnt < 0) return false;
+
 	int pid = 0;
-	for(ssize_t i = 0; i < cnt; i++) {
-		libusb_device *device = devs[i];
-		libusb_device_descriptor desc = {
-			0, // bLength
-			0, // bDescriptorType
-			0, // bcdUSB
-			0, // bDeviceClass
-			0, // bDeviceSubClass
-			0, // bDeviceProtocol
-			0, // bMaxPacketSize0
-			0, // idVendor
-			0, // idProduct
-			0, // bcdDevice
-			0, // iManufacturer
-			0, // iProduct
-			0, // iSerialNumber
-			0  // bNumConfigurations
-		};
-		libusb_get_device_descriptor(device, &desc);
-		if (desc.idVendor == 0x046d) {
-			if (desc.idProduct == 0xc331) { pid = desc.idProduct; break; } // G810 spectrum
-			if (desc.idProduct == 0xc337) { pid = desc.idProduct; break; } // G810 spectrum
-			if (desc.idProduct == 0xc330) { pid = desc.idProduct; break; } // G410 spectrum
-			if (desc.idProduct == 0xc333) { pid = desc.idProduct; break; } // G610 spectrum
-			if (desc.idProduct == 0xc32b) { // G910 spark
-				pid = desc.idProduct;
+	hid_device_info *devs, *cur_dev;
+
+	devs = hid_enumerate(0x0, 0x0);
+	for (cur_dev = devs; cur_dev; cur_dev = cur_dev->next) {
+		if (cur_dev->vendor_id == 0x046d) {
+			if (cur_dev->product_id == 0xc331) { pid = cur_dev->product_id; break; } // G810 spectrum
+			if (cur_dev->product_id == 0xc337) { pid = cur_dev->product_id; break; } // G810 spectrum
+			if (cur_dev->product_id == 0xc330) { pid = cur_dev->product_id; break; } // G410 spectrum
+			if (cur_dev->product_id == 0xc333) { pid = cur_dev->product_id; break; } // G610 spectrum
+			if (cur_dev->product_id == 0xc32b) { // G910 spark
+				pid = cur_dev->product_id;
 				kbdProtocol = KeyboardProtocol::g910;
 				break;
 			}
-			if (desc.idProduct == 0xc335) { // G910 spectrum
-				pid = desc.idProduct;
+			if (cur_dev->product_id == 0xc335) { // G910 spectrum
+				pid = cur_dev->product_id;
 				kbdProtocol = KeyboardProtocol::g910;
 				break;
 			}
 		}
 	}
-	libusb_free_device_list(devs, 1);
+	hid_free_enumeration(devs);
 	if (pid == 0) {
-		libusb_exit(ctx);
-		ctx = NULL;
+		std::cerr << "No pid" << std::endl;
+		hid_exit();
 		return false;
 	}
-	
-	dev_handle = libusb_open_device_with_vid_pid(ctx, 0x046d, pid);
+
+	dev_handle = hid_open(0x046d, pid, NULL);
 	if (dev_handle == NULL) {
-		libusb_exit(ctx);
-		ctx = NULL;
+		std::cerr << "Failed to open device" << std::endl;
+		hid_exit();
 		return false;
 	}
-	if(libusb_kernel_driver_active(dev_handle, 1) == 1) {
-		libusb_detach_kernel_driver(dev_handle, 1);
-		m_isKernellDetached = true;
-	}
-	r = libusb_claim_interface(dev_handle, 1);
-	if(r < 0) return false;
 	m_isAttached = true;
 	return true;
 }
 
 bool Keyboard::detach() {
 	if (m_isAttached == false) return false;
-	int r;
-	r = libusb_release_interface(dev_handle, 1);
-	if(r!=0) return false;
-	if(m_isKernellDetached==true) {
-		libusb_attach_kernel_driver(dev_handle, 1);
-		m_isKernellDetached = false;
-	}
-	libusb_close(dev_handle);
+	hid_close(dev_handle);
 	dev_handle = NULL;
-	libusb_exit(ctx);
-	ctx = NULL;
+	hid_exit();
 	m_isAttached = false;
 	return true;
 }
@@ -498,11 +461,15 @@ bool Keyboard::parseSpeed(std::string speed, uint8_t &speedValue) {
 	return true;
 }
 
-bool Keyboard::sendDataInternal(unsigned char *data, uint16_t data_size) {
-	if (m_isAttached == false) return false;
-	int r;
+bool Keyboard::sendDataInternal(unsigned char *data, size_t data_size) {
+	if (m_isAttached == false) { std::cerr << "Keyboard not attached" << std::endl; return false; }
+	/*int r;
 	if (data_size > 20) r = libusb_control_transfer(dev_handle, 0x21, 0x09, 0x0212, 1, data, data_size, 2000);
-	else r = libusb_control_transfer(dev_handle, 0x21, 0x09, 0x0211, 1, data, data_size, 2000);
+	else r = libusb_control_transfer(dev_handle, 0x21, 0x09, 0x0211, 1, data, data_size, 2000);*/
+
+	int r;
+	r = hid_write(dev_handle, data, data_size);
+
 	usleep(1000);
 	if (r < 0) return false;
 	return true;
@@ -707,7 +674,7 @@ bool Keyboard::setKeys(KeyValue keyValue[], size_t keyValueCount) {
 	KeyValue multimedia[maxMultimediaKeys];
 	KeyValue keys[maxKeys];
 	KeyValue gkeys[maxGKeys];
-	
+
 	for (size_t i = 0; i < keyValueCount; i++) {
 		if(keyValue[i].key.addressGroup == KeyAddressGroup::logo && logoCount <= maxLogoKeys) {
 			logo[logoCount] = keyValue[i];
@@ -726,13 +693,13 @@ bool Keyboard::setKeys(KeyValue keyValue[], size_t keyValueCount) {
 			gkeysCount++;
 		}
 	}
-	
+
 	if (logoCount > 0) setKeysInternal(KeyAddressGroup::logo, logo, logoCount);
-	
+
 	if (indicatorsCount > 0) setKeysInternal(KeyAddressGroup::indicators, indicators, indicatorsCount);
-	
+
 	if (multimediaCount > 0) setKeysInternal(KeyAddressGroup::multimedia, multimedia, multimediaCount);
-	
+
 	if (keysCount > 0) {
 		const size_t maxKeyValueCount = 14;
 		for (size_t i = 0; i < keysCount; i = i + maxKeyValueCount) {
@@ -747,9 +714,9 @@ bool Keyboard::setKeys(KeyValue keyValue[], size_t keyValueCount) {
 			setKeysInternal(KeyAddressGroup::keys, keysBlock, keysBlockCount);
 		}
 	}
-	
+
 	if (gkeysCount > 0) setKeysInternal(KeyAddressGroup::gkeys, gkeys, gkeysCount);
-	
+
 	return true;
 }
 
@@ -855,7 +822,7 @@ bool Keyboard::setFXColor(KeyColors colors) {
 	bool retval = false;
 	int data_size = 20;
 	unsigned char *data = new unsigned char[data_size];
-	
+
 	// Keys
 	data[0] = 0x11;  // Base address
 	data[1] = 0xff;  // Base address
@@ -869,7 +836,7 @@ bool Keyboard::setFXColor(KeyColors colors) {
 	data[9] = 0x02;
 	for(int i = 10; i < data_size; i++) data[i] = 0x00;
 	retval = sendDataInternal(data, data_size);
-	
+
 	// Logo
 	data[0] = 0x11;  // Base address
 	data[1] = 0xff;  // Base address
@@ -883,7 +850,7 @@ bool Keyboard::setFXColor(KeyColors colors) {
 	data[9] = 0x02;
 	for(int i = 10; i < data_size; i++) data[i] = 0x00;
 	retval = sendDataInternal(data, data_size);
-	
+
 	delete[] data;
 	return retval;
 }
@@ -892,7 +859,7 @@ bool Keyboard::setFXBreathing(KeyColors colors, uint8_t speed) {
 	bool retval = false;
 	int data_size = 20;
 	unsigned char *data = new unsigned char[data_size];
-	
+
 	// Keys
 	data[0] = 0x11;  // Base address
 	data[1] = 0xff;  // Base address
@@ -909,7 +876,7 @@ bool Keyboard::setFXBreathing(KeyColors colors, uint8_t speed) {
 	data[12] = 0x64;
 	for(int i = 13; i < data_size; i++) data[i] = 0x00;
 	retval = sendDataInternal(data, data_size);
-	
+
 	// Logo
 	data[0] = 0x11;  // Base address
 	data[1] = 0xff;  // Base address
@@ -926,7 +893,7 @@ bool Keyboard::setFXBreathing(KeyColors colors, uint8_t speed) {
 	data[12] = 0x64;
 	for(int i = 13; i < data_size; i++) data[i] = 0x00;
 	retval = sendDataInternal(data, data_size);
-	
+
 	delete[] data;
 	return retval;
 }
@@ -935,7 +902,7 @@ bool Keyboard::setFXColorCycle(uint8_t speed) {
 	bool retval = false;
 	int data_size = 20;
 	unsigned char *data = new unsigned char[data_size];
-	
+
 	// Keys
 	data[0] = 0x11;  // Base address
 	data[1] = 0xff;  // Base address
@@ -954,7 +921,7 @@ bool Keyboard::setFXColorCycle(uint8_t speed) {
 	data[14] = 0x64;
 	for(int i = 15; i < data_size; i++) data[i] = 0x00;
 	retval = sendDataInternal(data, data_size);
-	
+
 	// Logo
 	data[0] = 0x11;  // Base address
 	data[1] = 0xff;  // Base address
@@ -973,7 +940,7 @@ bool Keyboard::setFXColorCycle(uint8_t speed) {
 	data[14] = 0x64;
 	for(int i = 15; i < data_size; i++) data[i] = 0x00;
 	retval = sendDataInternal(data, data_size);
-	
+
 	delete[] data;
 	return retval;
 }
@@ -982,7 +949,7 @@ bool Keyboard::setFXHWave(uint8_t speed) {
 	bool retval = false;
 	int data_size = 20;
 	unsigned char *data = new unsigned char[data_size];
-	
+
 	// Keys
 	data[0] = 0x11;  // Base address
 	data[1] = 0xff;  // Base address
@@ -1002,7 +969,7 @@ bool Keyboard::setFXHWave(uint8_t speed) {
 	data[15] = speed; // Speed
 	for(int i = 16; i < data_size; i++) data[i] = 0x00;
 	retval = sendDataInternal(data, data_size);
-	
+
 	// Logo
 	data[0] = 0x11;  // Base address
 	data[1] = 0xff;  // Base address
@@ -1022,7 +989,7 @@ bool Keyboard::setFXHWave(uint8_t speed) {
 	data[15] = 0x00;
 	for(int i = 16; i < data_size; i++) data[i] = 0x00;
 	retval = sendDataInternal(data, data_size);
-	
+
 	delete[] data;
 	return retval;
 }
@@ -1031,7 +998,7 @@ bool Keyboard::setFXVWave(uint8_t speed) {
 	bool retval = false;
 	int data_size = 20;
 	unsigned char *data = new unsigned char[data_size];
-	
+
 	// Keys
 	data[0] = 0x11;  // Base address
 	data[1] = 0xff;  // Base address
@@ -1051,7 +1018,7 @@ bool Keyboard::setFXVWave(uint8_t speed) {
 	data[15] = speed; // Speed
 	for(int i = 16; i < data_size; i++) data[i] = 0x00;
 	retval = sendDataInternal(data, data_size);
-	
+
 	// Logo
 	data[0] = 0x11;  // Base address
 	data[1] = 0xff;  // Base address
@@ -1071,7 +1038,7 @@ bool Keyboard::setFXVWave(uint8_t speed) {
 	data[15] = 0x00;
 	for(int i = 16; i < data_size; i++) data[i] = 0x00;
 	retval = sendDataInternal(data, data_size);
-	
+
 	delete[] data;
 	return retval;
 }
@@ -1080,7 +1047,7 @@ bool Keyboard::setFXCWave(uint8_t speed) {
 	bool retval = false;
 	int data_size = 20;
 	unsigned char *data = new unsigned char[data_size];
-	
+
 	// Keys
 	data[0] = 0x11;  // Base address
 	data[1] = 0xff;  // Base address
@@ -1100,7 +1067,7 @@ bool Keyboard::setFXCWave(uint8_t speed) {
 	data[15] = speed; // Speed
 	for(int i = 16; i < data_size; i++) data[i] = 0x00;
 	retval = sendDataInternal(data, data_size);
-	
+
 	// Logo
 	data[0] = 0x11;  // Base address
 	data[1] = 0xff;  // Base address
@@ -1120,7 +1087,7 @@ bool Keyboard::setFXCWave(uint8_t speed) {
 	data[15] = 0x00;
 	for(int i = 16; i < data_size; i++) data[i] = 0x00;
 	retval = sendDataInternal(data, data_size);
-	
+
 	delete[] data;
 	return retval;
 }
